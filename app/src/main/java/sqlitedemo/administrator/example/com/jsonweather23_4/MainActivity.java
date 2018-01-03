@@ -1,7 +1,10 @@
 package sqlitedemo.administrator.example.com.jsonweather23_4;
 
+import android.content.Intent;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -11,17 +14,23 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
+import android.util.Xml;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.xmlpull.v1.XmlPullParser;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -34,17 +43,32 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Vector;
 
-public class MainActivity extends AppCompatActivity{
-    private String cityname="广州";
+import static android.R.attr.bitmap;
+
+public class MainActivity extends AppCompatActivity implements Runnable{
+    private String city="广州";
     HttpURLConnection httpConn = null;
     InputStream din =null;
     //private EditText mCityname;
     private AutoCompleteTextView mCityname;
     private Button mSearch;
-    private TextView mShowTV;
+    private LinearLayout mShowTV;
     String db_name = "weather";
     String db_path = "data/data/sqlitedemo.administrator.example.com.jsonweather23_4/database/";
+
+    Vector<String> cityname=new Vector<String>();
+    Vector<String> low=new Vector<String>();
+    Vector<String> hight=new Vector<String>();
+    Vector<String> icon=new Vector<String>();
+    Vector<Bitmap> bitmap=new Vector<Bitmap>();
+    Vector<String> summary=new Vector<String>();
+
+
+
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -54,18 +78,24 @@ public class MainActivity extends AppCompatActivity{
         copydb();
 
         mSearch = (Button) findViewById(R.id.search);
-        mShowTV = (TextView) findViewById(R.id.show_weather);
-        mShowTV.setMovementMethod(ScrollingMovementMethod.getInstance());
+        mShowTV = (LinearLayout) findViewById(R.id.show_weather);
+        //mShowTV.setMovementMethod(ScrollingMovementMethod.getInstance());
         mSearch.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mShowTV.setText("");
-                cityname = mCityname.getText().toString();
+               // mShowTV.setText("");
+                mShowTV.removeAllViews();
+                city = mCityname.getText().toString();
                 Toast.makeText(MainActivity.this,"正在查询天气...",Toast.LENGTH_LONG).show();
-                GetJson gd = new GetJson(cityname);
+               /* GetJson gd = new GetJson(cityname);
                 gd.start();
+                */
+                Thread th = new Thread(MainActivity.this);
+                th.start();
             }
         });
+
+
         mCityname = (AutoCompleteTextView) findViewById(R.id.cityname);
         mCityname.setThreshold(1);
         mCityname.addTextChangedListener(new TextWatcher() {
@@ -104,8 +134,136 @@ public class MainActivity extends AppCompatActivity{
         });
 
     }
+    @Override
+    public void run () {
+        cityname.removeAllElements();
+        low.removeAllElements();
+        hight.removeAllElements();
+        icon.removeAllElements();
+        bitmap.removeAllElements();
+        summary.removeAllElements();
+        parseData();
+        downImage();
+        Message message = new Message();
+        message.what = 1;
+        handler.sendMessage(message);
+    }
+    public void parseData(){
+        int i=0;
+        String sValue;
+        String weatherUrl="http://flash.weather.com.cn/wmaps/xml/"+city+".xml";
+        String weatherIcon="http://m.weather.com.cn/img/c";
+        try{
+            URL url=new URL(weatherUrl);
+            httpConn=(HttpURLConnection)url.openConnection();
+            httpConn.setRequestMethod("GET");
+            din=httpConn.getInputStream();
+            XmlPullParser xmlParser= Xml.newPullParser();
+            xmlParser.setInput(din,"UTF-8");
+            int evtType=xmlParser.getEventType();
+            while(evtType!=XmlPullParser.END_DOCUMENT){
+                switch (evtType){
+                    case XmlPullParser.START_TAG:
+                        String tag=xmlParser.getName();
+                        if (tag.equalsIgnoreCase("city")){
+                            cityname.addElement(xmlParser.getAttributeValue(null,"cityname")+"天气:");
+                            summary.addElement(xmlParser.getAttributeValue(null,"stateDetailed"));
+                            low.addElement("最低:"+xmlParser.getAttributeValue(null,"tem2"));
+                            hight.addElement("最高:"+xmlParser.getAttributeValue(null,"tem1"));
+                            icon.addElement(weatherIcon+xmlParser.getAttributeValue(null,"state1")+".gif");
+                        }
+                        break;
+                    case XmlPullParser.END_TAG:
+                    default:break;
+                }
+                evtType=xmlParser.next();
+            }
+        }catch (Exception ex){
+            ex.printStackTrace();
+        }finally {
+            try{
+                din.close();
+                httpConn.disconnect();
+            }catch (Exception ex){
+                ex.printStackTrace();
+            }
+        }
+    }
+    private void downImage(){
+        int i=0;
+        for (i=0;i<icon.size();i++){
+            try{
+                URL url=new URL(icon.elementAt(i));
+                System.out.println(icon.elementAt(i));
+                httpConn=(HttpURLConnection)url.openConnection();
+                httpConn.setRequestMethod("GET");
+                din=httpConn.getInputStream();
+                bitmap.addElement(BitmapFactory.decodeStream(httpConn.getInputStream()));
+            }catch (Exception ex){
+                ex.printStackTrace();
+            }finally {
+                try{
+                    din.close();
+                    httpConn.disconnect();
+                }catch (Exception ex){
+                    ex.printStackTrace();
+                }
+            }
+        }
+    }
+    private final Handler handler=new Handler(){
+        public void handleMessage(Message msg){
+            switch (msg.what){
+                case 1:
+                    showData();
+                    break;
+            }
+            super.handleMessage(msg);
+        }
+    };
+    public void showData(){
+        mShowTV.removeAllViews();
+        mShowTV.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.weight=80;
+        params.height=50;
+        for (int i=0;i<cityname.size();i++){
+            LinearLayout linearLayout=new LinearLayout(this);
+            linearLayout.setOrientation(LinearLayout.HORIZONTAL);
 
-    private final Handler handler = new Handler(){
+            TextView dayView=new TextView(this);
+            dayView.setLayoutParams(params);
+            dayView.setText(cityname.elementAt(i));
+            linearLayout.addView(dayView);
+
+            TextView summaryView=new TextView(this);
+            summaryView.setLayoutParams(params);
+            summaryView.setText(summary.elementAt(i));
+            linearLayout.addView(summaryView);
+
+            ImageView icon=new ImageView(this);
+            icon.setLayoutParams(params);
+            icon.setImageBitmap(bitmap.elementAt(i));
+            linearLayout.addView(icon);
+
+            TextView lowView=new TextView(this);
+            lowView.setLayoutParams(params);
+            lowView.setText(low.elementAt(i));
+            linearLayout.addView(lowView);
+
+            TextView hightView=new TextView(this);
+            hightView.setLayoutParams(params);
+            hightView.setText(hight.elementAt(i));
+            linearLayout.addView(hightView);
+            mShowTV.addView(linearLayout);
+        }
+    }
+
+
+
+  /* private final Handler handler = new Handler(){
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what){
@@ -115,8 +273,8 @@ public class MainActivity extends AppCompatActivity{
             }
             super.handleMessage(msg);
         }
-    };
-    private  void showData(String jData){
+    };*/
+   /* private  void showData(String jData){
         try {
             JSONObject jobj = new JSONObject(jData);
             JSONObject weather = jobj.getJSONObject("data");
@@ -142,7 +300,7 @@ public class MainActivity extends AppCompatActivity{
             ex.printStackTrace();
         }
 
-    }
+    }*/
     private void copydb(){
         File db_file = new File(db_path+db_name);
         Log.i("weather","数据库创建");
@@ -169,7 +327,7 @@ public class MainActivity extends AppCompatActivity{
         }
 
     }
-    class GetJson extends Thread{
+    /*class GetJson extends Thread{
         private String urlstr =  "http://wthrcdn.etouch.cn/weather_mini?city=";
         public GetJson(String cityname){
             try{
@@ -214,5 +372,7 @@ public class MainActivity extends AppCompatActivity{
                 }
             }
         }
-    }
+    }*/
+
+
 }
